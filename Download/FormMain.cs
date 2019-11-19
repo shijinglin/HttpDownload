@@ -48,7 +48,7 @@ namespace Download
                 textBox1.ReadOnly = true;
                 int port = int.Parse(textBox1.Text);
                 int tryCount = 0;
-                Begin:
+            Begin:
                 linkLabel1.Text = "http://localhost:" + port + "/";
                 HttpListener httpListener = new HttpListener();
                 try
@@ -256,6 +256,17 @@ namespace Download
                                                         }
                                                     }
                                                     //生成界面代码
+                                                    //备注，说明
+                                                    if (File.Exists(dirFullPath + @"\_DirMemo.txt"))
+                                                    {
+                                                        StreamReader sr = new StreamReader(dirFullPath + @"\_DirMemo.txt");
+                                                        string memo = sr.ReadToEnd();
+                                                        sr.Dispose();
+                                                        memo = memo.Replace("\r\n", "<br />");
+                                                        result += "<H3>" + memo + "</H3><br />";
+                                                    }
+
+                                                    //文件夹列表
                                                     if (dis != null && dis.Count > 0)
                                                     {
                                                         hasContent = true;
@@ -277,7 +288,8 @@ namespace Download
                                                     {
                                                         //排出本程序自生相关文件
                                                         if (!item.Name.Equals(new FileInfo(Application.ExecutablePath).Name)
-                                                        && !item.Name.Equals("Config.ini") && !item.Name.Equals("favicon.ico") && !dicLink.Contains(item.Name))
+                                                        && !item.Name.Equals("Config.ini") && !item.Name.Equals("favicon.ico")
+                                                        && !item.Name.Equals("_DirMemo.txt") && !dicLink.Contains(item.Name))
                                                         {
                                                             //文件大小、单位转换
                                                             fileSize = 0;
