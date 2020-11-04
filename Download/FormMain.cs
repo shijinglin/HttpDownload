@@ -48,7 +48,7 @@ namespace Download
                 textBox1.ReadOnly = true;
                 int port = int.Parse(textBox1.Text);
                 int tryCount = 0;
-            Begin:
+                Begin:
                 linkLabel1.Text = "http://localhost:" + port + "/";
                 HttpListener httpListener = new HttpListener();
                 try
@@ -114,6 +114,7 @@ namespace Download
                                             isLink = true;
                                         }
                                         bool isRedirect = false;
+                                        string dirName = string.Empty;
                                         if (!isLink && !Directory.Exists(dirFullPath))
                                         {
                                             string[] partPath = pram.Split(new string[] { "/", "\\" }, StringSplitOptions.RemoveEmptyEntries);
@@ -122,6 +123,7 @@ namespace Download
                                                 string tempPath = Application.StartupPath;
                                                 foreach (string item in partPath)
                                                 {
+                                                    dirName = item;
                                                     tempPath += "/" + item;
                                                     if (File.Exists(tempPath + ".lnk"))
                                                     {
@@ -138,7 +140,14 @@ namespace Download
                                                 }
                                             }
                                         }
-                                        bool isBigFile = false;
+                                        else
+                                        {
+                                            string[] partPath = dirFullPath.Split(new string[] { "/", "\\" }, StringSplitOptions.RemoveEmptyEntries);
+                                            if (partPath != null && partPath.Length > 0)
+                                            {
+                                                dirName = partPath[partPath.Length - 1];
+                                            }
+                                        }
                                         bool isDonload = false;
                                         if (System.IO.File.Exists(dirFullPath))
                                         {
@@ -146,11 +155,26 @@ namespace Download
                                             #region 文件下载
                                             //文件输出
                                             FileStream fileStream = new System.IO.FileStream(dirFullPath, System.IO.FileMode.Open, System.IO.FileAccess.Read, FileShare.ReadWrite);
-                                            if (fileStream != null && fileStream.Length <= int.MaxValue)
+                                            if (fileStream != null)
                                             {
-                                                int byteLength = (int)fileStream.Length;
+                                                long byteLength = (long)fileStream.Length;
                                                 byte[] fileBytes = new byte[byteLength];
-                                                fileStream.Read(fileBytes, 0, byteLength);
+                                                //分配读取
+                                                int x = 0;
+                                                while (x < byteLength)
+                                                {
+                                                    int temp = 0;
+                                                    if (byteLength - x > int.MaxValue)
+                                                    {
+                                                        temp = int.MaxValue;
+                                                    }
+                                                    else
+                                                    {
+                                                        temp = (int)(byteLength - x);
+                                                    }
+                                                    fileStream.Read(fileBytes, x, temp);
+                                                    x += temp;
+                                                }
                                                 fileStream.Close();
                                                 fileStream.Dispose();
                                                 //数据流模式
@@ -162,7 +186,22 @@ namespace Download
                                                 try
                                                 {
                                                     //下载
-                                                    httpListenerContext.Response.OutputStream.Write(fileBytes, 0, byteLength);
+                                                    //分配输出
+                                                    x = 0;
+                                                    while (x < byteLength)
+                                                    {
+                                                        int temp = 0;
+                                                        if (byteLength - x > int.MaxValue)
+                                                        {
+                                                            temp = int.MaxValue;
+                                                        }
+                                                        else
+                                                        {
+                                                            temp = (int)(byteLength - x);
+                                                        }
+                                                        httpListenerContext.Response.OutputStream.Write(fileBytes, x, temp);
+                                                        x += temp;
+                                                    }
                                                 }
                                                 catch
                                                 {
@@ -170,13 +209,9 @@ namespace Download
                                                 }
                                                 httpListenerContext.Response.OutputStream.Close();
                                             }
-                                            else
-                                            {
-                                                isBigFile = true;
-                                            }
                                             #endregion
                                         }
-                                        if (!isDonload || isBigFile)
+                                        if (!isDonload)
                                         {
                                             //HTML结构
                                             result = "<HTML><HEAD><TITLE>HTTP下载 - v" + System.Reflection.Assembly.GetEntryAssembly().GetName().Version + "</TITLE></HEAD><BODY>";
@@ -187,193 +222,200 @@ namespace Download
                                             result += "&nbsp;&nbsp;<a href=\"http://" + request.UserHostName + (pram.Equals("/") ? "" : pram) + "?sorttype=" + (sortByName ? "name" : "time") + "&sort=" + (!isDesc ? "desc" : "asc") + "\"><font color=\"Red\">" + (isDesc ? "升序" : "降序") + "</font></a>";
                                             //首页
                                             result += (pram.Length > 1 ? ("&nbsp;&nbsp;<a href=\"http://" + request.UserHostName + "?sorttype=" + (sortByName ? "name" : "time") + "&sort=" + (isDesc ? "desc" : "asc") + "\">首页</a>") : "");
-                                            if (!isBigFile)
+                                            if (isLink || Directory.Exists(dirFullPath))
                                             {
-                                                if (isLink || Directory.Exists(dirFullPath))
+                                                bool hasContent = false;
+                                                if (isLink)
                                                 {
-                                                    bool hasContent = false;
-                                                    if (isLink)
+                                                    #region 快捷方式
+                                                    IWshRuntimeLibrary.WshShell shell = new IWshRuntimeLibrary.WshShell();
+                                                    IWshRuntimeLibrary.IWshShortcut iws = (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(dirFullPath + ".lnk");
+                                                    //文件夹
+                                                    dirFullPath = iws.TargetPath;
+                                                    #endregion
+                                                }
+                                                #region 文件夹
+                                                //返回上级
+                                                result += (pram.Length > 1 && pram.LastIndexOf("/") != pram.IndexOf("/") ? ("&nbsp;&nbsp;<a href=\"http://" + request.UserHostName + pram.Remove(pram.LastIndexOf("/")) + "?sorttype=" + (sortByName ? "name" : "time") + "&sort=" + (isDesc ? "desc" : "asc") + "\">返回上级</a>") : "") + "<br /><br />"; ;
+                                                //文件夹列表
+                                                Dictionary<string, DateTime> itemList = new Dictionary<string, DateTime>();
+                                                foreach (DirectoryInfo item in new DirectoryInfo(dirFullPath).GetDirectories())
+                                                {
+                                                    itemList.Add(item.Name, item.LastWriteTime);
+                                                }
+                                                //下级快捷方式
+                                                List<string> dicLink = new List<string>();
+                                                FileInfo[] filsLink = new DirectoryInfo(dirFullPath).GetFiles("*.lnk");
+                                                if (filsLink != null && filsLink.Length > 0)
+                                                {
+                                                    foreach (FileInfo item in filsLink)
                                                     {
-                                                        #region 快捷方式
                                                         IWshRuntimeLibrary.WshShell shell = new IWshRuntimeLibrary.WshShell();
-                                                        IWshRuntimeLibrary.IWshShortcut iws = (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(dirFullPath + ".lnk");
+                                                        IWshRuntimeLibrary.IWshShortcut iws = (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(item.FullName);
                                                         //文件夹
-                                                        dirFullPath = iws.TargetPath;
-                                                        #endregion
-                                                    }
-                                                    #region 文件夹
-                                                    //返回上级
-                                                    result += (pram.Length > 1 && pram.LastIndexOf("/") != pram.IndexOf("/") ? ("&nbsp;&nbsp;<a href=\"http://" + request.UserHostName + pram.Remove(pram.LastIndexOf("/")) + "?sorttype=" + (sortByName ? "name" : "time") + "&sort=" + (isDesc ? "desc" : "asc") + "\">返回上级</a>") : "") + "<br /><br />"; ;
-                                                    //文件夹列表
-                                                    Dictionary<string, DateTime> itemList = new Dictionary<string, DateTime>();
-                                                    foreach (DirectoryInfo item in new DirectoryInfo(dirFullPath).GetDirectories())
-                                                    {
-                                                        itemList.Add(item.Name, item.LastWriteTime);
-                                                    }
-                                                    //下级快捷方式
-                                                    List<string> dicLink = new List<string>();
-                                                    FileInfo[] filsLink = new DirectoryInfo(dirFullPath).GetFiles("*.lnk");
-                                                    if (filsLink != null && filsLink.Length > 0)
-                                                    {
-                                                        foreach (FileInfo item in filsLink)
+                                                        if (Directory.Exists(iws.TargetPath) && !itemList.ContainsKey(item.Name.Remove(item.Name.LastIndexOf("."))))
                                                         {
-                                                            IWshRuntimeLibrary.WshShell shell = new IWshRuntimeLibrary.WshShell();
-                                                            IWshRuntimeLibrary.IWshShortcut iws = (IWshRuntimeLibrary.IWshShortcut)shell.CreateShortcut(item.FullName);
-                                                            //文件夹
-                                                            if (Directory.Exists(iws.TargetPath))
-                                                            {
-                                                                dicLink.Add(item.Name);
-                                                                itemList.Add(item.Name.Remove(item.Name.LastIndexOf(".")), item.LastWriteTime);
-                                                            }
-                                                            else
-                                                            {
-                                                                //文件快捷方式不支持
-                                                            }
-                                                        }
-                                                    }
-                                                    //文件夹排序
-                                                    Dictionary<string, DateTime> dis = null;
-                                                    if (sortByName)
-                                                    {
-                                                        if (isDesc)
-                                                        {
-                                                            dis = itemList.OrderByDescending(p => p.Key).ToDictionary(p => p.Key, o => o.Value);
+                                                            dicLink.Add(item.Name);
+                                                            itemList.Add(item.Name.Remove(item.Name.LastIndexOf(".")), item.LastWriteTime);
                                                         }
                                                         else
                                                         {
-                                                            dis = itemList.OrderBy(p => p.Key).ToDictionary(p => p.Key, o => o.Value);
+                                                            //文件快捷方式不支持
                                                         }
+                                                    }
+                                                }
+                                                //文件夹排序
+                                                Dictionary<string, DateTime> dis = null;
+                                                if (sortByName)
+                                                {
+                                                    if (isDesc)
+                                                    {
+                                                        dis = itemList.OrderByDescending(p => p.Key).ToDictionary(p => p.Key, o => o.Value);
                                                     }
                                                     else
                                                     {
-                                                        if (isDesc)
-                                                        {
-                                                            dis = itemList.OrderByDescending(p => p.Value).ToDictionary(p => p.Key, o => o.Value);
-                                                        }
-                                                        else
-                                                        {
-                                                            dis = itemList.OrderBy(p => p.Value).ToDictionary(p => p.Key, o => o.Value);
-                                                        }
-                                                    }
-                                                    //生成界面代码
-                                                    //备注，说明
-                                                    if (File.Exists(dirFullPath + @"\_DirMemo.txt"))
-                                                    {
-                                                        StreamReader sr = new StreamReader(dirFullPath + @"\_DirMemo.txt");
-                                                        string memo = sr.ReadToEnd();
-                                                        sr.Dispose();
-                                                        memo = memo.Replace("\r\n", "<br />");
-                                                        result += "<H3>" + memo + "</H3><br />";
-                                                    }
-
-                                                    //文件夹列表
-                                                    if (dis != null && dis.Count > 0)
-                                                    {
-                                                        hasContent = true;
-                                                        result += "<span style=\"font-size:25px\">文件夹</span><br />";
-                                                        foreach (string item in dis.Keys)
-                                                        {
-                                                            result += "<a href=\"http://" + request.UserHostName + (pram.Equals("/") ? "" : pram) + "/" + item + "?sorttype=" + (sortByName ? "name" : "time") + "&sort=" + (isDesc ? "desc" : "asc") + "\">" + item + "</a><br />";
-                                                        }
-                                                        result += "<br />";
-                                                    }
-                                                    #endregion
-                                                    #region 文件
-                                                    itemList.Clear();
-                                                    //文件列表
-                                                    Dictionary<string, string> fileDate = new Dictionary<string, string>();
-                                                    decimal fileSize = 0;
-                                                    string unit = "Byte";
-                                                    foreach (FileInfo item in new DirectoryInfo(dirFullPath).GetFiles())
-                                                    {
-                                                        //排出本程序自生相关文件
-                                                        if (!item.Name.Equals(new FileInfo(Application.ExecutablePath).Name)
-                                                        && !item.Name.Equals("Config.ini") && !item.Name.Equals("favicon.ico")
-                                                        && !item.Name.Equals("_DirMemo.txt") && !dicLink.Contains(item.Name))
-                                                        {
-                                                            //文件大小、单位转换
-                                                            fileSize = 0;
-                                                            unit = "Byte";
-                                                            fileSize = (decimal)item.Length;
-                                                            if (fileSize > 1024)
-                                                            {
-                                                                fileSize = decimal.Round(fileSize / 1024, 2);
-                                                                unit = "KB";
-                                                                if (fileSize > 1024)
-                                                                {
-                                                                    fileSize = decimal.Round(fileSize / 1024, 2);
-                                                                    unit = "MB";
-                                                                    if (fileSize > 1024)
-                                                                    {
-                                                                        fileSize = decimal.Round(fileSize / 1024, 2);
-                                                                        unit = "GB";
-                                                                    }
-                                                                }
-                                                            }
-                                                            //记录文件名用于排序
-                                                            itemList.Add(item.Name, item.LastWriteTime);
-                                                            //记录其他信息：时间、大小
-                                                            fileDate.Add(item.Name, "<font color=\"#CC6633\">" + item.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss") + "</font>&nbsp;&nbsp;" + fileSize + "&nbsp;" + unit);
-                                                        }
-                                                    }
-                                                    //文件排序
-                                                    //文件夹排序
-                                                    Dictionary<string, DateTime> fis = null;
-                                                    if (sortByName)
-                                                    {
-                                                        if (isDesc)
-                                                        {
-                                                            fis = itemList.OrderByDescending(p => p.Key).ToDictionary(p => p.Key, o => o.Value);
-                                                        }
-                                                        else
-                                                        {
-                                                            fis = itemList.OrderBy(p => p.Key).ToDictionary(p => p.Key, o => o.Value);
-                                                        }
-                                                    }
-                                                    else
-                                                    {
-                                                        if (isDesc)
-                                                        {
-                                                            fis = itemList.OrderByDescending(p => p.Value).ToDictionary(p => p.Key, o => o.Value);
-                                                        }
-                                                        else
-                                                        {
-                                                            fis = itemList.OrderBy(p => p.Value).ToDictionary(p => p.Key, o => o.Value);
-                                                        }
-                                                    }
-                                                    //生成界面代码
-                                                    if (fis != null && fis.Count > 0)
-                                                    {
-                                                        hasContent = true;
-                                                        result += "<span style=\"font-size:25px\">文件</span><br />";
-                                                        foreach (string item in fis.Keys)
-                                                        {
-                                                            //文件和网页的快捷方式暂不支持下载
-                                                            if (item.ToLower().EndsWith(".lnk") || item.ToLower().EndsWith(".url"))
-                                                            {
-                                                                result += item + "&nbsp;&nbsp;" + fileDate[item] + "<br />";
-                                                            }
-                                                            else
-                                                            {
-                                                                //文件路径连接-点击下载
-                                                                result += "<a href=\"http://" + request.UserHostName + (pram.Equals("/") ? "" : pram) + "/" + item + "\">" + item + "</a>" + "&nbsp;&nbsp;" + fileDate[item] + "<br />";
-                                                            }
-                                                        }
-                                                    }
-                                                    #endregion
-                                                    if (!hasContent)
-                                                    {
-                                                        result += "<H1>空文件夹</H1>";
+                                                        dis = itemList.OrderBy(p => p.Key).ToDictionary(p => p.Key, o => o.Value);
                                                     }
                                                 }
                                                 else
                                                 {
-                                                    result += "<H1>404 此目录或文件不存在</H1>";
+                                                    if (isDesc)
+                                                    {
+                                                        dis = itemList.OrderByDescending(p => p.Value).ToDictionary(p => p.Key, o => o.Value);
+                                                    }
+                                                    else
+                                                    {
+                                                        dis = itemList.OrderBy(p => p.Value).ToDictionary(p => p.Key, o => o.Value);
+                                                    }
+                                                }
+                                                //生成界面代码
+                                                //备注，说明
+                                                if (File.Exists(dirFullPath + @"\_DirMemo.txt"))
+                                                {
+                                                    StreamReader sr = new StreamReader(dirFullPath + @"\_DirMemo.txt");
+                                                    string memo = sr.ReadToEnd();
+                                                    sr.Dispose();
+                                                    memo = memo.Replace("\r\n", "<br />");
+                                                    result += "<H3>" + memo + "</H3><br />";
+                                                }
+                                                else if (!string.IsNullOrEmpty(dirName))
+                                                {
+                                                    string desc = ConfigManagement.IniReadValue("Desc", dirName);
+                                                    if (!string.IsNullOrEmpty(desc))
+                                                    {
+                                                        result += "<H3>" + desc + "</H3><br />";
+                                                    }
+                                                }
+
+                                                //文件夹列表
+                                                if (dis != null && dis.Count > 0)
+                                                {
+                                                    hasContent = true;
+                                                    result += "<span style=\"font-size:25px\">文件夹</span><br />";
+                                                    foreach (string item in dis.Keys)
+                                                    {
+                                                        //过滤以“~”开头的文件夹，仅作为历史备份
+                                                        if (!item.StartsWith("~"))
+                                                        {
+                                                            result += "<a href=\"http://" + request.UserHostName + (pram.Equals("/") ? "" : pram) + "/" + item + "?sorttype=" + (sortByName ? "name" : "time") + "&sort=" + (isDesc ? "desc" : "asc") + "\">" + getItemDesc(item) + "</a><br />";
+                                                        }
+                                                    }
+                                                    result += "<br />";
+                                                }
+                                                #endregion
+                                                #region 文件
+                                                itemList.Clear();
+                                                //文件列表
+                                                Dictionary<string, string> fileDate = new Dictionary<string, string>();
+                                                decimal fileSize = 0;
+                                                string unit = "Byte";
+                                                foreach (FileInfo item in new DirectoryInfo(dirFullPath).GetFiles())
+                                                {
+                                                    //排出本程序自生相关文件
+                                                    if (!item.Name.Equals(new FileInfo(Application.ExecutablePath).Name)
+                                                    && !item.Name.Equals("Config.ini") && !item.Name.Equals("favicon.ico")
+                                                    && !item.Name.Equals("_DirMemo.txt") && !dicLink.Contains(item.Name)
+                                                    && !item.Name.StartsWith("~") //过滤以“~”开头的文件，仅作为历史备份
+                                                    && !item.Name.ToLower().Equals("interop.iwshruntimelibrary.dll"))
+                                                    {
+                                                        //文件大小、单位转换
+                                                        fileSize = 0;
+                                                        unit = "Byte";
+                                                        fileSize = (decimal)item.Length;
+                                                        if (fileSize > 1024)
+                                                        {
+                                                            fileSize = decimal.Round(fileSize / 1024, 2);
+                                                            unit = "KB";
+                                                            if (fileSize > 1024)
+                                                            {
+                                                                fileSize = decimal.Round(fileSize / 1024, 2);
+                                                                unit = "MB";
+                                                                if (fileSize > 1024)
+                                                                {
+                                                                    fileSize = decimal.Round(fileSize / 1024, 2);
+                                                                    unit = "GB";
+                                                                }
+                                                            }
+                                                        }
+                                                        //记录文件名用于排序
+                                                        itemList.Add(item.Name, item.LastWriteTime);
+                                                        //记录其他信息：时间、大小
+                                                        fileDate.Add(item.Name, "<font color=\"#CC6633\">" + item.LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss") + "</font>&nbsp;&nbsp;" + fileSize + "&nbsp;" + unit);
+                                                    }
+                                                }
+                                                //文件排序
+                                                //文件夹排序
+                                                Dictionary<string, DateTime> fis = null;
+                                                if (sortByName)
+                                                {
+                                                    if (isDesc)
+                                                    {
+                                                        fis = itemList.OrderByDescending(p => p.Key).ToDictionary(p => p.Key, o => o.Value);
+                                                    }
+                                                    else
+                                                    {
+                                                        fis = itemList.OrderBy(p => p.Key).ToDictionary(p => p.Key, o => o.Value);
+                                                    }
+                                                }
+                                                else
+                                                {
+                                                    if (isDesc)
+                                                    {
+                                                        fis = itemList.OrderByDescending(p => p.Value).ToDictionary(p => p.Key, o => o.Value);
+                                                    }
+                                                    else
+                                                    {
+                                                        fis = itemList.OrderBy(p => p.Value).ToDictionary(p => p.Key, o => o.Value);
+                                                    }
+                                                }
+                                                //生成界面代码
+                                                if (fis != null && fis.Count > 0)
+                                                {
+                                                    hasContent = true;
+                                                    result += "<span style=\"font-size:25px\">文件</span><br />";
+                                                    foreach (string item in fis.Keys)
+                                                    {
+                                                        //文件和网页的快捷方式暂不支持下载
+                                                        if (item.ToLower().EndsWith(".lnk") || item.ToLower().EndsWith(".url"))
+                                                        {
+                                                            result += item + "&nbsp;&nbsp;" + fileDate[item] + "<br />";
+                                                        }
+                                                        else
+                                                        {
+                                                            //文件路径连接-点击下载
+                                                            result += "<a href=\"http://" + request.UserHostName + (pram.Equals("/") ? "" : pram) + "/" + item + "\">" + item + "</a>" + "&nbsp;&nbsp;" + fileDate[item] + "<br />";
+                                                        }
+                                                    }
+                                                }
+                                                #endregion
+                                                if (!hasContent)
+                                                {
+                                                    result += "<H1>空文件夹</H1>";
                                                 }
                                             }
                                             else
                                             {
-                                                result += "<H1>文件太大，不支持下载</H1>";
+                                                result += "<H1>404 此目录或文件不存在</H1>";
                                             }
                                             //HTML结尾
                                             result += "</BODY></HTML>";
@@ -413,6 +455,20 @@ namespace Download
                 })).Start();
                 ConfigManagement.IniWriteValue(this.GetType().FullName, "Port", textBox1.Text);
                 ConfigManagement.IniWriteValue(this.GetType().FullName, "RealPort", port.ToString());
+                try
+                {
+                    if (!Directory.Exists(@"D:\SiteMaster\D"))
+                    {
+                        Directory.CreateDirectory(@"D:\SiteMaster\D");
+                    }
+                    StreamWriter sw = new StreamWriter(@"D:\SiteMaster\D\index.htm", false, System.Text.Encoding.UTF8);
+                    sw.WriteLine("<H3>实际下载端口：<a href=\"javascript:void(0);\" onclick=\"openDownload(" + port + ")\">" + port + "</a></H3>");
+                    sw.WriteLine("<script> function openDownload(port){ var url = window.location.host;var urls = url.split(\":\");window.location.href = \"http://\"+urls[0] + \":\" + port;}</script>");
+                    sw.Flush();
+                    sw.Dispose();
+                }
+                catch
+                { }
             }
             catch (Exception ex)
             {
@@ -420,6 +476,24 @@ namespace Download
                 button1.Enabled = true;
                 textBox1.ReadOnly = false;
                 linkLabel1.Text = "";
+            }
+        }
+
+        /// <summary>
+        /// 获取项目描述
+        /// </summary>
+        /// <param name="item"></param>
+        /// <returns></returns>
+        private string getItemDesc(string item)
+        {
+            string desc = ConfigManagement.IniReadValue("Desc", item);
+            if (!string.IsNullOrEmpty(desc))
+            {
+                return $"{item}({desc})";
+            }
+            else
+            {
+                return item;
             }
         }
 
